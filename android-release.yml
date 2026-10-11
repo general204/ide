@@ -1,0 +1,63 @@
+name: Build APK (firmado)
+
+# Ejecución manual: Actions > Build APK (firmado) > Run workflow
+# Requiere los secretos: KEYSTORE_BASE64, KEY_ALIAS, KEYSTORE_PASSWORD, KEY_PASSWORD
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Dejar la app sin depender de internet
+        run: |
+          mkdir -p www/lib
+          cp index.html www/index.html
+          curl -fsSL -o www/lib/react.js https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js
+          curl -fsSL -o www/lib/react-dom.js https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js
+          curl -fsSL -o www/lib/htm.js https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js
+          sed -i 's#https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js#lib/react.js#' www/index.html
+          sed -i 's#https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js#lib/react-dom.js#' www/index.html
+          sed -i 's#https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js#lib/htm.js#' www/index.html
+          sed -i 's#sandbox="allow-scripts allow-modals allow-forms allow-popups"#sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin"#' www/index.html
+
+      - name: Crear proyecto Android
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Compilar release
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - uses: r0adkll/sign-android-release@v1
+        id: sign
+        with:
+          releaseDirectory: android/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leon-ide-apk-firmado
+          path: ${{ steps.sign.outputs.signedReleaseFile }}
